@@ -153,12 +153,29 @@ def model(dbt, session):
                     """)
             save_log()
 
+    def sql_with_retry(query, attempts=4, base_delay=5):
+        """Run a session.sql that hits the network (read_text listing fetches / GitHub
+        backfill). nemweb occasionally throws a transient 403/5xx when rate-limited; retry
+        with exponential backoff (5s, 10s, 20s) instead of failing the whole run."""
+        import time
+        for attempt in range(attempts):
+            try:
+                return session.sql(query)
+            except Exception as e:
+                if attempt < attempts - 1:
+                    wait = base_delay * (2 ** attempt)
+                    print(f"  WARN: network query failed ({type(e).__name__}: {e}); "
+                          f"retry {attempt + 1}/{attempts - 1} in {wait}s")
+                    time.sleep(wait)
+                else:
+                    raise
+
     # =========================================================================
     # DAILY REPORTS (SCADA + PRICE)
     # =========================================================================
 
     # Fetch file listing from AEMO
-    session.sql("""
+    sql_with_retry("""
         CREATE OR REPLACE TEMP TABLE daily_files_web AS
         WITH
           html_data AS (
@@ -185,7 +202,7 @@ def model(dbt, session):
 
     if aemo_new < daily_download_limit:
         # Backfill from GitHub
-        session.sql("""
+        sql_with_retry("""
             INSERT INTO daily_files_web
             WITH
               api_responses AS (
@@ -228,7 +245,7 @@ def model(dbt, session):
     # INTRADAY SCADA
     # =========================================================================
 
-    session.sql("""
+    sql_with_retry("""
         CREATE OR REPLACE TEMP TABLE intraday_scada_web AS
         WITH
           html_data AS (
@@ -262,7 +279,7 @@ def model(dbt, session):
     # INTRADAY PRICE
     # =========================================================================
 
-    session.sql("""
+    sql_with_retry("""
         CREATE OR REPLACE TEMP TABLE intraday_price_web AS
         WITH
           html_data AS (

@@ -120,6 +120,15 @@ the files via the Python downloader step, run the `check_new_daily → build →
 test` sequence, then `deploy.py`. Triggers on push to any branch; the service principal has a
 federated credential for `main`.
 
+> **Granting the CI identity workspace access — pick the right object.** The deploy service
+> principal must be added to the target workspace (Member/Admin). When you search for it in the
+> workspace **Manage access** picker you may see **two entries with the same name**: one is the
+> security **group** ("just a name"), the other is the **service principal / app** (shows an
+> **App ID**). Add the one **with the App ID** matching `AZURE_CLIENT_ID` — that is the identity
+> the GitHub OIDC login actually authenticates as. Granting the same-named *group* does nothing
+> unless the SP is a member of it. Symptom of getting this wrong: Phase 1 fails with
+> `The Workspace 'null.Workspace' could not be found` (the SP can't resolve the workspace name).
+
 ---
 
 See **[CLAUDE.md](CLAUDE.md)** for the T-SQL conventions and notes from validating the pipeline

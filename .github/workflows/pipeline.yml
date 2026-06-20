@@ -91,12 +91,20 @@ jobs:
           print(f"download_limit={dl}")
           print(f"daily_download_limit={e.get('ci_daily_download_limit', e.get('daily_download_limit', dl))}")
           EOF
+          # Capture the Warehouse SQL token NOW, while the OIDC client assertion is still valid
+          # (it lasts only ~5 min). The long Phase 1.5 daily backfill otherwise pushes Phase 2
+          # past the assertion expiry, and CLI auth then can't mint a token (AADSTS700024 — the
+          # token is fetched lazily at dbt-run time). samdebruyn uses access_token directly (the
+          # access token is valid ~75 min), so dbt never re-exchanges the short-lived assertion.
+          DWH_TOKEN=$(az account get-access-token --resource https://database.windows.net --query accessToken -o tsv)
+          echo "::add-mask::$DWH_TOKEN"
           {
             echo "FILES_PATH=abfss://$WS_ID@onelake.dfs.fabric.microsoft.com/$LH_ID/Files"
             echo "FABRIC_DWH_SERVER=$DWH_SERVER"
             echo "FABRIC_DWH_NAME=$WH_NAME"
             echo "FABRIC_WORKSPACE_ID=$WS_ID"
             echo "FABRIC_AUTH=CLI"
+            echo "FABRIC_ACCESS_TOKEN=$DWH_TOKEN"
             echo "WS_ID=$WS_ID"
             echo "WS_NAME=$WS_NAME"
             echo "LH_ID=$LH_ID"

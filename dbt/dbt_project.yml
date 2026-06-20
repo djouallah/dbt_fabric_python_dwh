@@ -19,6 +19,12 @@ clean-targets:
 on-run-start:
   - "{{ create_schemas_if_not_exists(['landing', 'mart']) }}"
 
+# After a model run, refresh a read-only point-in-time snapshot of the warehouse (samdebruyn
+# feature, retained up to 30 days) so the Direct-Lake semantic model / Power BI can read a
+# stable copy while dbt rebuilds. Gated to run/build so it doesn't re-fire on `dbt test`.
+on-run-end:
+  - "{{ create_or_update_fabric_warehouse_snapshot('aemo_snapshot', 'Latest point-in-time snapshot after dbt run') if flags.WHICH in ['run', 'build'] else '' }}"
+
 vars:
   # Env vars used:
   # - DBT_SCHEMA: default schema (default: mart)

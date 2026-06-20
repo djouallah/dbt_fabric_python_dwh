@@ -19,18 +19,18 @@ defaults:
   ci_process_limit:  "2"
 
 local:
-  ws:            "91588e42-0f1c-4e56-bcaa-cbf015b8f312"
+  ws:            "d5f25039-7f33-4668-b909-2c397b2626fb"
   lakehouse:     "bf9ad9cb-295f-4df1-8cf0-519a8b2cfbda"
   process_limit: "1000"
   dbt_path:      "/lakehouse/default/Files/dbt_fabric_python_notebook_dwh/dbt"
 
 main:
-  ws:                "91588e42-0f1c-4e56-bcaa-cbf015b8f312"
+  ws:                "d5f25039-7f33-4668-b909-2c397b2626fb"
   schedule_interval: "720"
   download_limit:    "5"
   process_limit:     "100"
 
 production:
-  ws:             "be079b0f-3416-4de2-9184-9c546bad223c"
+  ws:             "d5f25039-7f33-4668-b909-2c397b2626fb"
   download_limit: "60"
   process_limit:  "600"

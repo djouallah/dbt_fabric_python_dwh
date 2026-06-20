@@ -37,17 +37,6 @@ alongside the `csv_raw_archive_log.parquet` watermark. The T-SQL models then rea
 `OPENROWSET`. The deploy provisions a Warehouse (and the lakehouse if missing) and materializes
 the models there.
 
-## Coexisting in a shared workspace
-
-This is designed to deploy **into the same workspace** as other AEMO projects without
-clashing:
-
-- The Fabric items are suffixed `_dwh` with their own logicalIds —
-  `run_dwh.Notebook`, `run_pipeline_dwh.DataPipeline`, `aemo_electricity_dwh.SemanticModel`,
-  `deploy_config_dwh.VariableLibrary` — and the warehouse is `aemo_wh`.
-- `deploy.py` moves them into a dedicated workspace folder (`folder_name: aemo_dwh` in
-  `deploy_config.yml`, best-effort) so they sit apart from any other items.
-- The **lakehouse is shared** (the raw files live there) and is left in place.
 
 ## dbt-fabric configuration
 

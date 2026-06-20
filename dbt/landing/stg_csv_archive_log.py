@@ -22,6 +22,10 @@ def model(dbt, session):
     csv_archive_path = root_path + "/csv_raw"
     csv_log_path = root_path + "/csv_raw_archive_log.parquet"
     download_limit = int(os.environ.get("download_limit", "2"))
+    # Daily files are backfilled from GitHub (raw download_url), not nemweb, so a high limit
+    # is safe. Intraday (scada/price) hits nemweb directly, which throttles bursts (HTTP 403)
+    # — keep that on the smaller download_limit. Defaults to download_limit when unset.
+    daily_download_limit = int(os.environ.get("daily_download_limit", str(download_limit)))
     batch_size = 7
     max_workers = 8
 
@@ -179,7 +183,7 @@ def model(dbt, session):
         )
     """).fetchone()[0]
 
-    if aemo_new < download_limit:
+    if aemo_new < daily_download_limit:
         # Backfill from GitHub
         session.sql("""
             INSERT INTO daily_files_web
@@ -214,7 +218,7 @@ def model(dbt, session):
         WHERE 'daily::' || filename NOT IN (
             SELECT source_type || '::' || source_filename FROM _csv_archive_log
         )
-        LIMIT {download_limit}
+        LIMIT {daily_download_limit}
     """).fetchall()
 
     if daily_to_download:

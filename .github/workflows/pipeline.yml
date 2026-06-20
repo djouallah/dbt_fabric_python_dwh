@@ -87,7 +87,9 @@ jobs:
           import yaml
           cfg = yaml.safe_load(open('deploy_config.yml'))
           e = {**cfg.get('defaults', {}), **cfg['main']}
-          print(f"download_limit={e.get('ci_download_limit', e.get('download_limit', '5'))}")
+          dl = e.get('ci_download_limit', e.get('download_limit', '5'))
+          print(f"download_limit={dl}")
+          print(f"daily_download_limit={e.get('ci_daily_download_limit', e.get('daily_download_limit', dl))}")
           EOF
           {
             echo "FILES_PATH=abfss://$WS_ID@onelake.dfs.fabric.microsoft.com/$LH_ID/Files"

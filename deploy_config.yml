@@ -12,6 +12,9 @@ defaults:
   schedule_start:    "2025-01-01T00:00:00"
   schedule_end:      "2030-12-31T23:59:59"
   ci_download_limit: "30"
+  # Daily files come from GitHub backfill (not nemweb), so a high limit is safe; intraday stays
+  # on ci_download_limit to avoid nemweb throttling.
+  ci_daily_download_limit: "90"
 
 local:
   ws:            "d5f25039-7f33-4668-b909-2c397b2626fb"

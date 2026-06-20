@@ -2,6 +2,7 @@
     "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/variableLibrary/definition/variables/1.0.0/schema.json",
     "variables": [
         {"name": "download_limit", "type": "String", "value": "1"},
+        {"name": "process_limit", "type": "String", "value": "1000"},
         {"name": "lakehouse_name", "type": "String", "value": "data"},
         {"name": "warehouse_name", "type": "String", "value": "aemo"},
         {"name": "workspace_id", "type": "String", "value": "ea575278-bd81-459c-9680-47829898c902"}

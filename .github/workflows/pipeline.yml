@@ -90,6 +90,7 @@ jobs:
           dl = e.get('ci_download_limit', e.get('download_limit', '5'))
           print(f"download_limit={dl}")
           print(f"daily_download_limit={e.get('ci_daily_download_limit', e.get('daily_download_limit', dl))}")
+          print(f"process_limit={e.get('ci_process_limit', e.get('process_limit', '1000'))}")
           EOF
           # Capture the Warehouse SQL token NOW, while the OIDC client assertion is still valid
           # (it lasts only ~5 min). The long Phase 1.5 daily backfill otherwise pushes Phase 2

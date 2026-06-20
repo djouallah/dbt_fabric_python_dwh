@@ -8,10 +8,15 @@ defaults:
   # here (schemas: landing, mart). Distinct name so it never clashes with the duckdb solution.
   warehouse_name:    "aemo"
   download_limit:    "2"
+  # Max files an incremental fact model ingests per run. Hard-capped by Fabric's 1024
+  # explicit-BULK-paths-per-statement limit, so keep <= ~1000. A from-scratch backfill
+  # converges over multiple runs.
+  process_limit:     "1000"
   schedule_interval: "30"
   schedule_start:    "2025-01-01T00:00:00"
   schedule_end:      "2030-12-31T23:59:59"
   ci_download_limit: "30"
+  ci_process_limit:  "1000"
   # Daily files come from GitHub backfill (not nemweb), so a high limit is safe (tune for the
   # 90-min CI budget); intraday stays on ci_download_limit to avoid nemweb throttling.
   ci_daily_download_limit: "365"

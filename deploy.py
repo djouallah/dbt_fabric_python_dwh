@@ -135,6 +135,7 @@ if args.full:
         "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/variableLibrary/definition/variables/1.0.0/schema.json",
         "variables": [
             {"name": "download_limit", "type": "String", "value": cfg["download_limit"]},
+            {"name": "process_limit",  "type": "String", "value": cfg["process_limit"]},
             {"name": "lakehouse_name", "type": "String", "value": LH_NAME},
             {"name": "warehouse_name", "type": "String", "value": WH_NAME},
             {"name": "workspace_id",   "type": "String", "value": WS_ID},

@@ -11,6 +11,9 @@ aemo_electricity:
       # Warehouse name (database) — the dbt models materialize here.
       database: "{{ env_var('FABRIC_DWH_NAME') }}"
       schema: "{{ env_var('DBT_SCHEMA', 'mart') }}"
+      # Workspace context — required by the warehouse-snapshot macro (and Python models); the
+      # adapter calls the Fabric REST API with it. Unused for plain SQL connections.
+      workspace_id: "{{ env_var('FABRIC_WORKSPACE_ID', '') }}"
       # Auth method handed to the samdebruyn/mssql-python adapter:
       #   CLI                             -> uses the logged-in `az` identity (CI + laptop)
       #   ActiveDirectoryServicePrincipal -> tenant_id/client_id/client_secret below

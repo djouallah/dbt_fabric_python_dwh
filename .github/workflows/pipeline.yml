@@ -95,6 +95,7 @@ jobs:
             echo "FILES_PATH=abfss://$WS_ID@onelake.dfs.fabric.microsoft.com/$LH_ID/Files"
             echo "FABRIC_DWH_SERVER=$DWH_SERVER"
             echo "FABRIC_DWH_NAME=$WH_NAME"
+            echo "FABRIC_WORKSPACE_ID=$WS_ID"
             echo "FABRIC_AUTH=CLI"
             echo "WS_ID=$WS_ID"
             echo "WS_NAME=$WS_NAME"

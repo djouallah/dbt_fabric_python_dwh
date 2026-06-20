@@ -42,8 +42,9 @@ jobs:
 
       - name: 📦 Install dependencies
         # dbt-fabric-samdebruyn uses the pure-Python mssql-python driver — no ODBC driver
-        # (msodbcsql18/unixODBC) install needed. It pulls a compatible dbt-core (1.11/1.12).
-        run: pip install dbt-fabric-samdebruyn pyyaml ms-fabric-cli duckdb
+        # (msodbcsql18/unixODBC) install needed. It depends on dbt-adapters (not dbt-core),
+        # so dbt-core must be installed explicitly for the `dbt` CLI entry point.
+        run: pip install dbt-fabric-samdebruyn dbt-core pyyaml ms-fabric-cli duckdb
 
       - name: 🔐 Azure federated login
         uses: azure/login@v2

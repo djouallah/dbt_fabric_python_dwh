@@ -1,25 +1,32 @@
 -- depends_on: {{ ref('fct_scada_today') }}
 -- depends_on: {{ ref('fct_price_today') }}
 
-{#-- Overwrite-vs-append is decided by the RUNNER, not the model (full_refresh is fixed at
-     parse time and can't be toggled from a run-time probe). The runner (notebook + CI) checks
-     the check_new_daily run-operation and reruns this model with --full-refresh only when a
-     new daily file landed (-> is_incremental() false -> full rebuild from daily; dbt-fabric
-     drops+recreates the table). A plain run appends today's intraday (-> is_incremental()
-     true). append (not merge): the incremental branch's cutoff watermark already excludes
-     rows already in the table, so there is nothing to update. --#}
+{#-- Rebuild-vs-append is decided by the RUNNER, not the model. The runner (notebook + CI) checks
+     the check_new_daily run-operation and, when a new daily file landed, reruns this model with
+     `--vars 'rebuild_summary: true'`. We deliberately do NOT use --full-refresh: on dbt-fabric
+     that DROPs + recreates the table (a Sch-M DDL swap that deadlocks Fabric's background
+     stats/clustering maintenance, loses grants, and rebinds Direct Lake every run).
+       - rebuild (new daily): incremental_strategy='delete+insert' on unique_key
+         [date,time,DUID]. The full-rebuild branch emits the complete history, so the keyed
+         DELETE removes every existing row and the INSERT repopulates it (a native delete+insert,
+         no DROP, no hook). The table object, CLUSTER BY definition and grants are preserved.
+       - plain run: incremental_strategy='append' adds today's intraday. The cutoff watermark
+         already excludes rows already in the table, so there is nothing to update/delete. --#}
 {{ config(
     materialized='incremental',
-    incremental_strategy='append',
+    incremental_strategy=('delete+insert' if var('rebuild_summary', false) else 'append'),
+    unique_key=['date', 'time', 'DUID'],
     schema='mart',
     cluster_by=['date', 'DUID']
 ) }}
-{#-- cluster_by (samdebruyn): emits CREATE TABLE ... WITH (CLUSTER BY ([date],[DUID])) on the
-     full rebuild (this model runs --full-refresh on every new-daily run), so the summary is
-     physically clustered for the common filters/joins (date slicing + per-DUID). Fabric maintains
-     the clustering automatically after the initial declaration; intraday append runs just INSERT. --#}
+{#-- cluster_by (samdebruyn): emits CREATE TABLE ... WITH (CLUSTER BY ([date],[DUID])) on the very
+     first build, so the summary is physically clustered for the common filters/joins (date slicing
+     + per-DUID). It's a table-definition property, so the daily delete+insert rebuild keeps it
+     (the table is never dropped); Fabric maintains the clustering automatically thereafter. --#}
 
-{% if is_incremental() %}
+{%- set rebuild = var('rebuild_summary', false) -%}
+
+{% if is_incremental() and not rebuild %}
 
 -- Append intraday: today's rows after the last cutoff baked into the table.
 WITH max_cutoff AS (
@@ -56,7 +63,7 @@ FROM incremental_data
 
 {% else %}
 
--- Full rebuild (runs under --full-refresh -> overwrite): authoritative daily + today's
+-- Full rebuild (runs when rebuild_summary=true via delete+insert, or on first build): authoritative daily + today's
 -- intraday after the daily cutoff. The cutoff column is the watermark the append path reads.
 WITH scada_cutoff AS (
   SELECT MAX(SETTLEMENTDATE) AS c FROM {{ ref('fct_scada') }}

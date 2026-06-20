@@ -156,8 +156,11 @@ jobs:
           dbt run --exclude fct_summary $DAILY_EX $DBT \
             || { echo "::warning::dbt run failed — retrying once..."; sleep 30; dbt retry $DBT; }
           # 3. Summary: overwrite when a new daily landed, else append intraday.
+          # fct_summary can lose a SQL Server deadlock to a concurrent warehouse writer (e.g. the
+          # scheduled Fabric pipeline) — the engine asks us to "rerun the transaction". Retry once.
           FR=""; [ "$NEW_DAILY" = "1" ] && FR="--full-refresh"
-          dbt run --select fct_summary $FR $DBT
+          dbt run --select fct_summary $FR $DBT \
+            || { echo "::warning::fct_summary failed (deadlock?) — retrying once..."; sleep 30; dbt run --select fct_summary $FR $DBT; }
           cp dbt/target/run_results.json /tmp/rr_0.json 2>/dev/null || true
           echo "T_DBT_RUN=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
 

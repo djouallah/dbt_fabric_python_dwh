@@ -6,7 +6,7 @@ defaults:
   lakehouse_name:    "data"
   # Fabric Warehouse: provisioned if missing, kept if it exists. dbt models materialize
   # here (schemas: landing, mart). Distinct name so it never clashes with the duckdb solution.
-  warehouse_name:    "aemo_wh"
+  warehouse_name:    "aemo"
   download_limit:    "2"
   schedule_interval: "30"
   schedule_start:    "2025-01-01T00:00:00"

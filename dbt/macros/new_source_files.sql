@@ -24,7 +24,7 @@
        OLDEST first: a from-scratch backfill (e.g. fresh warehouse, ~3000 files in the log) then
        converges over a few runs instead of blowing the limit. Steady-state new files (<= the daily
        download limit) are well under the cap. --#}
-  {%- set process_limit = 1000 -%}
+  {%- set process_limit = env_var('process_limit', '1000') | int -%}
   {%- if this_relation is not none -%}
     {%- set q -%}
       SELECT TOP {{ process_limit }} l.archive_path

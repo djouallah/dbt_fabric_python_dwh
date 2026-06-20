@@ -179,6 +179,7 @@ if args.full:
 #    warehouse item id, not the lakehouse). Skips fab_deploy if the post-substitution .bim
 #    matches the one cached in OneLake from the previous deploy.
 print("=== 5. Deploy semantic model ===")
+SEMANTIC_MODEL = f"{ws}.Workspace/{SM_NAME}.SemanticModel"
 bim_path.write_text(bim_text.replace(source_ws_id, WS_ID).replace(source_item_id, target_wh_id))
 local_bim = bim_path.read_bytes()
 remote_bim_path = f"{LAKEHOUSE}/Files/semanticmodel/{SM_NAME}.bim"
@@ -196,19 +197,33 @@ unchanged = (
 )
 cache_path.unlink(missing_ok=True)
 
+def deploy_semantic_model():
+    for attempt in range(1, 4):
+        try:
+            fab_deploy(["SemanticModel"])
+            return
+        except subprocess.CalledProcessError:
+            if attempt == 3:
+                raise
+            print(f"SemanticModel deploy attempt {attempt} failed (likely mid-refresh); waiting 45s and retrying...")
+            time.sleep(45)
+
 try:
     if unchanged:
         print("SemanticModel definition matches cached deploy, skipping fab_deploy.")
     else:
-        for attempt in range(1, 4):
-            try:
-                fab_deploy(["SemanticModel"])
-                break
-            except subprocess.CalledProcessError:
-                if attempt == 3:
-                    raise
-                print(f"SemanticModel deploy attempt {attempt} failed (likely mid-refresh); waiting 45s and retrying...")
-                time.sleep(45)
+        try:
+            deploy_semantic_model()
+        except subprocess.CalledProcessError:
+            # A Direct-Lake-on-OneLake model is bound to the warehouse ITEM ID, which changes
+            # whenever the warehouse is dropped/recreated. The existing model then points at a
+            # now-deleted artifact, and fab deploy's in-place UPDATE fails server-side with
+            # "The Fabric artifact '<old-wh-id>' is not found...". Delete the stale model and
+            # recreate it fresh against the current warehouse id.
+            print("SemanticModel publish failed (stale Direct Lake binding?); deleting and recreating fresh...")
+            subprocess.run(["fab", "rm", SEMANTIC_MODEL, "-f"], cwd=str(root))
+            time.sleep(10)
+            deploy_semantic_model()
         subprocess.run(["fab", "mkdir", f"{LAKEHOUSE}/Files/semanticmodel"], cwd=str(root))
         fab(["cp", str(bim_path), remote_bim_path, "-f"])
 finally:
@@ -269,7 +284,6 @@ if args.full:
 
 # 7. Refresh semantic model (OneLake permission propagation lags the deploy).
 print("=== 7. Refresh semantic model ===")
-SEMANTIC_MODEL = f"{ws}.Workspace/{SM_NAME}.SemanticModel"
 sm_id = get_item_id(SEMANTIC_MODEL)
 for attempt in range(1, 4):
     try:

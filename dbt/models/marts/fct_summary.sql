@@ -11,8 +11,13 @@
 {{ config(
     materialized='incremental',
     incremental_strategy='append',
-    schema='mart'
+    schema='mart',
+    cluster_by=['date', 'DUID']
 ) }}
+{#-- cluster_by (samdebruyn): emits CREATE TABLE ... WITH (CLUSTER BY ([date],[DUID])) on the
+     full rebuild (this model runs --full-refresh on every new-daily run), so the summary is
+     physically clustered for the common filters/joins (date slicing + per-DUID). Fabric maintains
+     the clustering automatically after the initial declaration; intraday append runs just INSERT. --#}
 
 {% if is_incremental() %}
 

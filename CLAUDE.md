@@ -1,13 +1,20 @@
-# Fabric Warehouse (dbt-fabric) — Lessons & Conventions
+# Fabric Warehouse (dbt-fabric-samdebruyn) — Lessons & Conventions
 
-This repo is the **dbt-fabric / Fabric Data Warehouse** port of the duckrun (dbt-duckdb +
+This repo is the **dbt-fabric-samdebruyn / Fabric Data Warehouse** port of the duckrun (dbt-duckdb +
 delta-rs) AEMO pipeline. Same models, same business logic — different execution engine.
+
+> **Adapter:** `dbt-fabric-samdebruyn` (community, type still `fabric`). It is a drop-in for
+> Microsoft's `dbt-fabric` on the Warehouse/T-SQL path but uses the pure-Python **`mssql-python`**
+> driver — **no ODBC** (`msodbcsql18`/`unixODBC`) and no `driver:` field. Chosen for: row-count
+> **stats** in `dbt docs generate` catalog output, and no-ODBC installs. (It also supports Python
+> models, but only PySpark-via-Livy — we deliberately do **not** use that; see "Do NOT".)
 
 ## Architecture (what changed vs the duckrun repo)
 
-- **dbt-fabric executes T-SQL in a Fabric Warehouse**; the analytics models materialize as
-  warehouse tables (schemas `landing`, `mart`). dbt-fabric **cannot run Python (`dbt.python`)
-  models** — only T-SQL.
+- **The adapter executes T-SQL in a Fabric Warehouse**; the analytics models materialize as
+  warehouse tables (schemas `landing`, `mart`). On the Warehouse path we run **only T-SQL** —
+  samdebruyn *can* run Python models, but only PySpark DataFrames via Livy (no duckdb/requests),
+  which we don't use; the downloader stays a standalone DuckDB step.
 - **The Python downloader is kept and runs as a standalone DuckDB step** (NOT a dbt model).
   `dbt/landing/stg_csv_archive_log.py` is the duckrun downloader, reused almost verbatim. It
   lives **outside** `model-paths: ["models"]` so dbt-fabric never tries to compile it. The
@@ -67,17 +74,17 @@ delta-rs) AEMO pipeline. Same models, same business logic — different executio
 - **CI / local**: `authentication: CLI` (the workflow `az login`s via OIDC; `deploy.py` uses
   the Fabric CLI federated login). Set `FABRIC_DWH_SERVER` (warehouse `connectionString`) +
   `FABRIC_DWH_NAME` + `FABRIC_AUTH=CLI`.
-- **Fabric notebook**: resolves the warehouse SQL endpoint via the Fabric REST API and passes
-  a SQL-endpoint access token to dbt-fabric (`FABRIC_AUTH=ActiveDirectoryAccessToken`,
-  `FABRIC_ACCESS_TOKEN`).
+- **Fabric notebook**: resolves the warehouse SQL endpoint via the Fabric REST API and sets
+  `FABRIC_AUTH=notebookutils` — samdebruyn's `notebookutils` auth resolves the SQL token itself
+  (no manual `FABRIC_ACCESS_TOKEN`). The storage token is still fetched for the DuckDB downloader.
 
 ## ⚠️ Risks to validate in a real Fabric workspace (could not be tested offline)
 
 1. ~~OPENROWSET reading gzip~~ **RESOLVED**: Fabric OPENROWSET can't read gzip CSV (see the
    uncompressed-`csv_raw` note in Architecture). Files are landed plain and read with PARSER 2.0;
    verified end-to-end against a live Warehouse (a 48 MB daily file → 147,456 DUNIT rows).
-2. **dbt-fabric token auth inside a Fabric notebook** — confirm the exact `authentication`
-   value / token audience the installed adapter version accepts (see `profiles.yml`).
+2. **samdebruyn `notebookutils` auth inside a Fabric notebook** — confirm the installed adapter
+   version resolves the warehouse SQL token via `authentication: notebookutils` (see `profiles.yml`).
 3. **Direct-Lake-on-OneLake against a Warehouse** — confirm `model.bim`'s `AzureStorage.DataLake`
    URL repointed to the warehouse item id exposes `Tables/<schema>/<table>`.
 4. **Reading all files each run** (folder wildcard + `filepath()` filter) is heavier than the
@@ -85,11 +92,13 @@ delta-rs) AEMO pipeline. Same models, same business logic — different executio
 
 ## Do NOT
 
-- Turn `dbt/landing/stg_csv_archive_log.py` into a dbt-fabric model or move it under
-  `models/` — dbt-fabric can't run Python; it must stay outside `model-paths` and be invoked
-  via the standalone DuckDB step (notebook cell + CI "Phase 1.5"). It is kept close to the
-  duckrun repo's version **except** it lands plain `.CSV` (not `.gz`) into `csv_raw/` — do not
-  "resync" that back to gzip; Fabric OPENROWSET can't read gzip CSV.
+- Turn `dbt/landing/stg_csv_archive_log.py` into a dbt model or move it under `models/`. Even
+  though samdebruyn supports Python models, they are **PySpark-via-Livy only** (no duckdb/requests)
+  and **the user has refused PySpark** — do not rewrite the downloader as a Spark model. It must
+  stay outside `model-paths` and be invoked via the standalone DuckDB step (notebook cell + CI
+  "Phase 1.5"). It is kept close to the duckrun repo's version **except** it lands plain `.CSV`
+  (not `.gz`) into `csv_raw/` — do not "resync" that back to gzip; Fabric OPENROWSET can't read
+  gzip CSV.
 - Add `partition_by` (Fabric has none) or `TIMESTAMPTZ` (use `DATETIME2`) **in the T-SQL
   models**. (The DuckDB downloader still uses `TIMESTAMPTZ` internally — that's fine, it's not
   warehouse SQL.)

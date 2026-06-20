@@ -2,23 +2,25 @@ aemo_electricity:
   target: dev
   outputs:
     dev:
+      # dbt-fabric-samdebruyn: keeps type `fabric` for the Warehouse (T-SQL) target, but uses
+      # Microsoft's pure-Python `mssql-python` driver — no ODBC driver / no `driver:` field.
       type: fabric
-      driver: "{{ env_var('FABRIC_ODBC_DRIVER', 'ODBC Driver 18 for SQL Server') }}"
       # SQL connection string (analytics) endpoint of the Fabric Warehouse,
       # e.g. xxxxxxxx.datawarehouse.fabric.microsoft.com
       server: "{{ env_var('FABRIC_DWH_SERVER') }}"
       # Warehouse name (database) — the dbt models materialize here.
       database: "{{ env_var('FABRIC_DWH_NAME') }}"
       schema: "{{ env_var('DBT_SCHEMA', 'mart') }}"
-      # Auth method handed to the fabric/pyodbc adapter:
-      #   CLI                          -> uses the logged-in `az` identity (CI + laptop)
-      #   ServicePrincipal             -> tenant_id/client_id/client_secret below
-      #   ActiveDirectoryAccessToken   -> token supplied via the `access_token` field (Fabric notebook)
+      # Auth method handed to the samdebruyn/mssql-python adapter:
+      #   CLI                             -> uses the logged-in `az` identity (CI + laptop)
+      #   ActiveDirectoryServicePrincipal -> tenant_id/client_id/client_secret below
+      #   notebookutils                   -> adapter self-resolves the SQL token (Fabric notebook)
+      #   (access_token below overrides all of the above when set)
       authentication: "{{ env_var('FABRIC_AUTH', 'CLI') }}"
       tenant_id: "{{ env_var('AZURE_TENANT_ID', '') }}"
       client_id: "{{ env_var('AZURE_CLIENT_ID', '') }}"
       client_secret: "{{ env_var('AZURE_CLIENT_SECRET', '') }}"
-      # Only read when authentication == ActiveDirectoryAccessToken (notebook path).
+      # Direct token override (unused on the notebookutils/CLI paths; kept as a no-op default).
       access_token: "{{ env_var('FABRIC_ACCESS_TOKEN', '') }}"
       encrypt: true
       trust_cert: false

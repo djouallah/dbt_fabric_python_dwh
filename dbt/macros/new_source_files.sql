@@ -19,18 +19,26 @@
   {%- if not execute -%}{{ return([]) }}{%- endif -%}
   {%- set root = get_csv_archive_path() -%}
   {%- set log_path = get_root_path() ~ '/csv_raw_archive_log.parquet' -%}
+  {#-- Fabric OPENROWSET allows at most 1024 explicit BULK file paths PER STATEMENT (chunking via
+       UNION ALL doesn't help — the limit is per statement). So cap each run to process_limit files,
+       OLDEST first: a from-scratch backfill (e.g. fresh warehouse, ~3000 files in the log) then
+       converges over a few runs instead of blowing the limit. Steady-state new files (<= the daily
+       download limit) are well under the cap. --#}
+  {%- set process_limit = 1000 -%}
   {%- if this_relation is not none -%}
     {%- set q -%}
-      SELECT l.archive_path
+      SELECT TOP {{ process_limit }} l.archive_path
       FROM OPENROWSET(BULK '{{ log_path }}', FORMAT = 'PARQUET') AS l
       WHERE l.source_type = '{{ source_type }}'
         AND l.csv_filename NOT IN (SELECT DISTINCT [file] FROM {{ this_relation }})
+      ORDER BY l.archive_path
     {%- endset -%}
   {%- else -%}
     {%- set q -%}
-      SELECT l.archive_path
+      SELECT TOP {{ process_limit }} l.archive_path
       FROM OPENROWSET(BULK '{{ log_path }}', FORMAT = 'PARQUET') AS l
       WHERE l.source_type = '{{ source_type }}'
+      ORDER BY l.archive_path
     {%- endset -%}
   {%- endif -%}
   {%- set archive_paths = run_query(q).columns[0].values() -%}

@@ -16,13 +16,13 @@
     materialized='incremental',
     incremental_strategy=('delete+insert' if var('rebuild_summary', false) else 'append'),
     unique_key=['date', 'time', 'DUID'],
-    schema='mart',
-    cluster_by=['date', 'DUID']
+    schema='mart'
 ) }}
-{#-- cluster_by (samdebruyn): emits CREATE TABLE ... WITH (CLUSTER BY ([date],[DUID])) on the very
-     first build, so the summary is physically clustered for the common filters/joins (date slicing
-     + per-DUID). It's a table-definition property, so the daily delete+insert rebuild keeps it
-     (the table is never dropped); Fabric maintains the clustering automatically thereafter. --#}
+{#-- cluster_by was REMOVED: on a CLUSTER BY table Fabric runs automatic background
+     clustering/compaction that holds a lock on the table, and every fct_summary write (even a
+     plain intraday INSERT) then deadlocked against it *reproducibly* — the retry deadlocked too,
+     same process id. Dropping cluster_by is what stops the deadlocks; the summary is small and
+     date/DUID filtering is fine without physical clustering. Do not re-add it here. --#}
 
 {%- set rebuild = var('rebuild_summary', false) -%}
 

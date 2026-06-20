@@ -11,7 +11,7 @@ defaults:
   schedule_interval: "30"
   schedule_start:    "2025-01-01T00:00:00"
   schedule_end:      "2030-12-31T23:59:59"
-  ci_download_limit: "90"
+  ci_download_limit: "30"
 
 local:
   ws:            "d5f25039-7f33-4668-b909-2c397b2626fb"

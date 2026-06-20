@@ -13,7 +13,7 @@ See [CLAUDE.md](CLAUDE.md) for engine details and lessons.
 ## How data flows
 
 ```
-Python notebook (run_dwh) — downloads the AEMO reports + writes the archive log
+Python notebook (run) — downloads the AEMO reports + writes the archive log
         ▼
 Lakehouse OneLake Files
   Files/csv_raw/daily/*      Files/csv_raw/scada_today/*   Files/csv_raw/price_today/*
@@ -31,7 +31,7 @@ Power BI semantic model
 ```
 
 **Landing the files:** the **Python notebook** handles downloading and orchestration. A landing
-step (`dbt/landing/stg_csv_archive_log.py`, invoked by the `run_dwh` notebook and by CI before
+step (`dbt/landing/stg_csv_archive_log.py`, invoked by the `run` notebook and by CI before
 the dbt run) downloads the AEMO ZIPs and lands the CSVs **uncompressed** into `Files/csv_raw/**`,
 alongside the `csv_raw_archive_log.parquet` watermark. The T-SQL models then read those files via
 `OPENROWSET`. The deploy provisions a Warehouse (and the lakehouse if missing) and materializes
@@ -109,7 +109,7 @@ export FABRIC_DWH_NAME=<warehouse name>
 export FILES_PATH=abfss://<ws>@onelake.dfs.fabric.microsoft.com/<lh_id>/Files
 export FABRIC_AUTH=CLI
 dbt run  --project-dir dbt --profiles-dir dbt
-dbt test --project-dir dbt --profiles-dir dbt --exclude tag:heavy
+dbt test --project-dir dbt --profiles-dir dbt
 ```
 
 ### CI/CD

@@ -23,7 +23,6 @@ vars:
   # Env vars used:
   # - DBT_SCHEMA: default schema (default: mart)
   # - FILES_PATH: abfss OneLake Files root where the downloader lands CSVs (built by the runner)
-  # - process_limit: max files an incremental fact model ingests per run (default: 1000)
 
 models:
   aemo_electricity:

@@ -10,6 +10,12 @@ on:
       - "deploy_config.yml"
       - ".github/workflows/**"
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy scope (minimal = lh+wh+semantic model; full also deploys the Fabric notebook/pipeline orchestration demo; none = skip deploy)"
+        type: choice
+        options: [minimal, full, none]
+        default: minimal
 
 concurrency:
   group: deploy-${{ github.ref_name }}
@@ -84,7 +90,6 @@ jobs:
           cfg = yaml.safe_load(open('deploy_config.yml'))
           e = {**cfg.get('defaults', {}), **cfg['main']}
           print(f"download_limit={e.get('ci_download_limit', e.get('download_limit', '5'))}")
-          print(f"process_limit={e.get('ci_process_limit', e.get('process_limit', '100'))}")
           EOF
           {
             echo "FILES_PATH=abfss://$WS_ID@onelake.dfs.fabric.microsoft.com/$LH_ID/Files"
@@ -148,7 +153,7 @@ jobs:
       - name: ✅ Phase 3 — dbt test
         run: |
           T0=$(date +%s)
-          dbt test --target dev --project-dir dbt --profiles-dir dbt --exclude tag:heavy
+          dbt test --target dev --project-dir dbt --profiles-dir dbt
           cp dbt/target/run_results.json /tmp/test_results.json
           echo "T_DBT_TEST=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
 
@@ -158,11 +163,22 @@ jobs:
           dbt docs generate --target dev --project-dir dbt --profiles-dir dbt
           echo "T_DBT_DOCS=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
 
-      - name: 🚀 Phase 5 — Deploy Fabric items
+      - name: 🚀 Phase 5 — Deploy Fabric items (optional)
         run: |
           T0=$(date +%s)
-          if grep -q "^${{ github.ref_name }}:" deploy_config.yml; then
-            python deploy.py --env ${{ github.ref_name }}
+          # Deploy is optional. Default scope = "minimal": lakehouse + warehouse + semantic
+          # model only (orchestration is GitHub Actions; the Fabric notebook/pipeline are just
+          # a demo, deployed only with scope "full"). "none" skips deploy entirely. On push the
+          # input is empty -> default to minimal.
+          DEPLOY="${{ github.event.inputs.deploy }}"
+          DEPLOY="${DEPLOY:-minimal}"
+          if [ "$DEPLOY" = "none" ]; then
+            echo "::notice::Deploy scope 'none' — skipping deploy."
+            echo "DEPLOY_SKIPPED=true" >> "$GITHUB_ENV"
+          elif grep -q "^${{ github.ref_name }}:" deploy_config.yml; then
+            FULL=""; [ "$DEPLOY" = "full" ] && FULL="--full"
+            echo "Deploy scope: $DEPLOY"
+            python deploy.py --env ${{ github.ref_name }} $FULL
             echo "DEPLOY_SKIPPED=false" >> "$GITHUB_ENV"
           else
             echo "::notice::No '${{ github.ref_name }}' section in deploy_config.yml — skipping deploy."

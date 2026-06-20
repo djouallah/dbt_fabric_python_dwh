@@ -1,4 +1,3 @@
-{{ config(tags=['heavy']) }}
 -- Test: All downloaded intraday SCADA files should be processed in fct_scada_today
 -- Returns rows where a downloaded file is missing from fct_scada_today
 

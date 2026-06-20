@@ -1,4 +1,3 @@
-{{ config(tags=['heavy']) }}
 -- Test: All downloaded intraday price files should be processed in fct_price_today
 -- Returns rows where a downloaded file is missing from fct_price_today
 

@@ -1,4 +1,3 @@
-{{ config(tags=['heavy']) }}
 -- Test: All downloaded daily files should be processed in fct_scada
 -- Returns rows where a downloaded file is missing from fct_scada
 

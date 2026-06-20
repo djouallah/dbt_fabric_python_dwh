@@ -11,7 +11,7 @@ delta-rs) AEMO pipeline. Same models, same business logic — different executio
 - **The Python downloader is kept and runs as a standalone DuckDB step** (NOT a dbt model).
   `dbt/landing/stg_csv_archive_log.py` is the duckrun downloader, reused almost verbatim. It
   lives **outside** `model-paths: ["models"]` so dbt-fabric never tries to compile it. The
-  notebook (`run_dwh`) and CI (`pipeline.yml` "Phase 1.5") invoke it by opening a plain
+  notebook (`run`) and CI (`pipeline.yml` "Phase 1.5") invoke it by opening a plain
   `duckdb.connect()` as the `session` and passing a no-op `dbt` stub (its only dbt call is
   `dbt.config(...)`). DuckDB authenticates to OneLake via an `azure`-extension secret built
   from a storage access token. It downloads AEMO ZIPs, lands the CSVs **uncompressed** into

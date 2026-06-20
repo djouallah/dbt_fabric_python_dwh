@@ -9,6 +9,13 @@ import yaml
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--env", default="prod")
+parser.add_argument(
+    "--full", action="store_true",
+    help="Also deploy the Fabric-native orchestration items: the notebook, variable "
+         "library and data pipeline (+ schedule). Default is a MINIMAL deploy of just the "
+         "lakehouse, warehouse and semantic model. The real orchestration is GitHub Actions; "
+         "the Fabric notebook/pipeline are only a fun demo of in-Fabric scheduling.",
+)
 args = parser.parse_args()
 
 root       = Path(__file__).parent
@@ -20,6 +27,8 @@ WS_ID      = cfg["ws"]
 LH_NAME    = cfg["lakehouse_name"]
 WH_NAME    = cfg["warehouse_name"]
 dbt        = root / "dbt"
+
+print(f"Deploy scope: {'FULL (lh + wh + semantic model + notebook/VL/pipeline)' if args.full else 'MINIMAL (lh + wh + semantic model)'}")
 
 # Derive item names from fabric_items/ folder names
 fabric_items = root / "fabric_items"
@@ -33,9 +42,6 @@ NB_NAME  = find_item("Notebook")
 PL_NAME  = find_item("DataPipeline")
 SM_NAME  = find_item("SemanticModel")
 VL_NAME  = find_item("VariableLibrary")
-# Optional workspace folder to deploy the items into (keeps them apart from the duckdb
-# solution when sharing a workspace). None / missing => deploy at the workspace root.
-FOLDER   = cfg.get("folder_name")
 
 # Resolve workspace name from ID (ws can be renamed; ID is stable)
 result = subprocess.run(
@@ -92,8 +98,6 @@ def fab_deploy(item_types):
         tmp.unlink(missing_ok=True)
 
 
-fab(["config", "set", "folder_listing_enabled", "true"])
-
 # 1. Lakehouse: provision if missing, keep if it exists. It holds the raw CSVs + archive
 #    log the models read via OPENROWSET.
 print("=== 1. Ensure lakehouse ===")
@@ -121,52 +125,54 @@ else:
 target_wh_id = get_item_id(WAREHOUSE)
 print(f"Warehouse ID: {target_wh_id}")
 
-# 3. Deploy notebook + variable library (variables.json rewritten per env, reverted after)
-print("=== 3. Deploy notebook + variable library ===")
-vl_path = fabric_items / f"{VL_NAME}.VariableLibrary" / "variables.json"
-vl_variables = {
-    "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/variableLibrary/definition/variables/1.0.0/schema.json",
-    "variables": [
-        {"name": "download_limit", "type": "String", "value": cfg["download_limit"]},
-        {"name": "process_limit",  "type": "String", "value": cfg["process_limit"]},
-        {"name": "lakehouse_name", "type": "String", "value": LH_NAME},
-        {"name": "warehouse_name", "type": "String", "value": WH_NAME},
-        {"name": "workspace_id",   "type": "String", "value": WS_ID},
-    ],
-}
-vl_path.write_text(json.dumps(vl_variables, indent=4))
-try:
-    fab_deploy(["Notebook", "VariableLibrary"])
-finally:
-    subprocess.run(["git", "checkout", str(vl_path)], cwd=str(root))
+# 3. (full only) Deploy notebook + variable library (variables.json rewritten per env,
+#    reverted after). These drive the in-Fabric orchestration demo; GitHub Actions is the
+#    real orchestrator, so they are skipped in the default minimal deploy.
+if args.full:
+    print("=== 3. Deploy notebook + variable library ===")
+    vl_path = fabric_items / f"{VL_NAME}.VariableLibrary" / "variables.json"
+    vl_variables = {
+        "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/variableLibrary/definition/variables/1.0.0/schema.json",
+        "variables": [
+            {"name": "download_limit", "type": "String", "value": cfg["download_limit"]},
+            {"name": "lakehouse_name", "type": "String", "value": LH_NAME},
+            {"name": "warehouse_name", "type": "String", "value": WH_NAME},
+            {"name": "workspace_id",   "type": "String", "value": WS_ID},
+        ],
+    }
+    vl_path.write_text(json.dumps(vl_variables, indent=4))
+    try:
+        fab_deploy(["Notebook", "VariableLibrary"])
+    finally:
+        subprocess.run(["git", "checkout", str(vl_path)], cwd=str(root))
 
-target_nb_id = get_item_id(NOTEBOOK)
-print(f"Target notebook ID:  {target_nb_id}")
+    target_nb_id = get_item_id(NOTEBOOK)
+    print(f"Target notebook ID:  {target_nb_id}")
 
-# 4. Copy dbt files to the EXISTING lakehouse OneLake Files (the notebook reads the project
-#    from Files/dbt). Skip build artifacts (target/, logs/).
-print("=== 4. Copy dbt files to OneLake ===")
-SKIP_DIRS = {"target", "logs"}
-files = [f for f in dbt.rglob("*")
-         if f.is_file() and not (set(f.relative_to(dbt).parts) & SKIP_DIRS)]
+    # 4. (full only) Copy dbt files to the EXISTING lakehouse OneLake Files (the notebook
+    #    reads the project from Files/dbt). Skip build artifacts (target/, logs/).
+    print("=== 4. Copy dbt files to OneLake ===")
+    SKIP_DIRS = {"target", "logs"}
+    files = [f for f in dbt.rglob("*")
+             if f.is_file() and not (set(f.relative_to(dbt).parts) & SKIP_DIRS)]
 
-dirs = set()
-for f in files:
-    p = f.relative_to(root).parent
-    while p.parts:
-        dirs.add(p.as_posix())
-        p = p.parent
+    dirs = set()
+    for f in files:
+        p = f.relative_to(root).parent
+        while p.parts:
+            dirs.add(p.as_posix())
+            p = p.parent
 
-for d in sorted(dirs):
-    subprocess.run(["fab", "mkdir", f"{LAKEHOUSE}/Files/{d}"], cwd=str(root))
+    for d in sorted(dirs):
+        subprocess.run(["fab", "mkdir", f"{LAKEHOUSE}/Files/{d}"], cwd=str(root))
 
-def copy_file(f):
-    rel = f.relative_to(root)
-    fab(["cp", rel.as_posix(), f"{LAKEHOUSE}/Files/{rel.parent.as_posix()}/", "-f"])
+    def copy_file(f):
+        rel = f.relative_to(root)
+        fab(["cp", rel.as_posix(), f"{LAKEHOUSE}/Files/{rel.parent.as_posix()}/", "-f"])
 
-with ThreadPoolExecutor(max_workers=8) as executor:
-    # Consume the iterator so a failed `fab cp` re-raises here (lazy map silently swallows).
-    list(executor.map(copy_file, files))
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        # Consume the iterator so a failed `fab cp` re-raises here (lazy map silently swallows).
+        list(executor.map(copy_file, files))
 
 # 5. Deploy semantic model (Direct Lake on the WAREHOUSE: repoint the OneLake GUID to the
 #    warehouse item id, not the lakehouse). Skips fab_deploy if the post-substitution .bim
@@ -207,57 +213,58 @@ try:
 finally:
     subprocess.run(["git", "checkout", str(bim_path)], cwd=str(root))
 
-# 6. Deploy DataPipeline + set notebook reference + schedule
-print("=== 6. Deploy pipeline ===")
-fab_deploy(["DataPipeline"])
+# 6. (full only) Deploy DataPipeline + set notebook reference + schedule.
+if args.full:
+    print("=== 6. Deploy pipeline ===")
+    fab_deploy(["DataPipeline"])
 
-print("=== 6b. Set notebook on pipeline ===")
-for i in (0, 1):
-    fab(["set", PIPELINE, "-q",
-         f"definition.parts[0].payload.properties.activities[{i}].typeProperties.notebookId",
-         "-i", target_nb_id, "-f"])
-    fab(["set", PIPELINE, "-q",
-         f"definition.parts[0].payload.properties.activities[{i}].typeProperties.workspaceId",
-         "-i", WS_ID, "-f"])
+    print("=== 6b. Set notebook on pipeline ===")
+    for i in (0, 1):
+        fab(["set", PIPELINE, "-q",
+             f"definition.parts[0].payload.properties.activities[{i}].typeProperties.notebookId",
+             "-i", target_nb_id, "-f"])
+        fab(["set", PIPELINE, "-q",
+             f"definition.parts[0].payload.properties.activities[{i}].typeProperties.workspaceId",
+             "-i", WS_ID, "-f"])
 
-# Reconcile to EXACTLY ONE schedule on the pipeline (REST API with jobType=Pipeline).
-pl_id = get_item_id(PIPELINE)
-sched_url = f"workspaces/{WS_ID}/items/{pl_id}/jobs/Pipeline/schedules"
-result = subprocess.run(["fab", "api", "-X", "get", sched_url],
-                        capture_output=True, text=True, cwd=str(root))
-try:
-    body = json.loads(result.stdout)
-except json.JSONDecodeError:
-    body = {}
-code = body.get("status_code")
-text = body.get("text") if isinstance(body.get("text"), dict) else {}
+    # Reconcile to EXACTLY ONE schedule on the pipeline (REST API with jobType=Pipeline).
+    pl_id = get_item_id(PIPELINE)
+    sched_url = f"workspaces/{WS_ID}/items/{pl_id}/jobs/Pipeline/schedules"
+    result = subprocess.run(["fab", "api", "-X", "get", sched_url],
+                            capture_output=True, text=True, cwd=str(root))
+    try:
+        body = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        body = {}
+    code = body.get("status_code")
+    text = body.get("text") if isinstance(body.get("text"), dict) else {}
 
-if code != 200:
-    print(f"::warning::schedule list returned {code} "
-          f"({text.get('errorCode')}: {text.get('message')}). Skipping schedule "
-          f"management to avoid duplicates — remove the offending schedule in the "
-          f"Fabric portal (Pipeline → Schedule) so the list works again.")
-else:
-    schedules = text.get("value") or []
-    if not schedules:
-        print("No existing schedule, creating one.")
-        fab(["job", "run-sch", PIPELINE,
-             "--type", "cron", "--interval", cfg["schedule_interval"],
-             "--start", cfg["schedule_start"], "--end", cfg["schedule_end"], "--enable"])
+    if code != 200:
+        print(f"::warning::schedule list returned {code} "
+              f"({text.get('errorCode')}: {text.get('message')}). Skipping schedule "
+              f"management to avoid duplicates — remove the offending schedule in the "
+              f"Fabric portal (Pipeline → Schedule) so the list works again.")
     else:
-        schedules.sort(key=lambda s: (
-            (s.get("configuration") or {}).get("type") != "Cron",
-            not s.get("enabled"),
-            s.get("createdDateTime", ""),
-        ))
-        keep, extras = schedules[0], schedules[1:]
-        if extras:
-            print(f"Pipeline has {len(schedules)} schedules; keeping {keep['id']}, "
-                  f"removing {len(extras)} extra(s).")
-            for s in extras:
-                fab(["job", "run-rm", PIPELINE, "--id", s["id"], "-f"])
+        schedules = text.get("value") or []
+        if not schedules:
+            print("No existing schedule, creating one.")
+            fab(["job", "run-sch", PIPELINE,
+                 "--type", "cron", "--interval", cfg["schedule_interval"],
+                 "--start", cfg["schedule_start"], "--end", cfg["schedule_end"], "--enable"])
         else:
-            print(f"Pipeline already has exactly one schedule ({keep['id']}), skipping.")
+            schedules.sort(key=lambda s: (
+                (s.get("configuration") or {}).get("type") != "Cron",
+                not s.get("enabled"),
+                s.get("createdDateTime", ""),
+            ))
+            keep, extras = schedules[0], schedules[1:]
+            if extras:
+                print(f"Pipeline has {len(schedules)} schedules; keeping {keep['id']}, "
+                      f"removing {len(extras)} extra(s).")
+                for s in extras:
+                    fab(["job", "run-rm", PIPELINE, "--id", s["id"], "-f"])
+            else:
+                print(f"Pipeline already has exactly one schedule ({keep['id']}), skipping.")
 
 # 7. Refresh semantic model (OneLake permission propagation lags the deploy).
 print("=== 7. Refresh semantic model ===")
@@ -273,29 +280,6 @@ for attempt in range(1, 4):
         print(f"Refresh attempt {attempt} failed (likely OneLake security still "
               f"propagating); waiting 60s and retrying...")
         time.sleep(60)
-
-
-# 8. Move the new items into their own workspace folder (best-effort) so they don't sit next
-# to the duckdb solution's items when sharing a workspace. Done LAST: every id/path-based op
-# above runs against the workspace-root paths first; a move does not change item IDs. The
-# shared lakehouse is intentionally left where it is.
-if FOLDER:
-    print(f"=== 8. Place items in folder '{FOLDER}' ===")
-    # Workspace folders are a Fabric resource type, not a Lakehouse Files directory: they are
-    # created with `fab create` and addressed with a `.Folder` suffix (NOT `fab mkdir`, which is
-    # for Files paths and would fall back to the local filesystem -> InvalidPath).
-    folder_path = f"{ws}.Workspace/{FOLDER}.Folder"
-    mk = subprocess.run(["fab", "create", folder_path],
-                        capture_output=True, text=True, cwd=str(root))
-    if mk.returncode != 0 and "exist" not in (mk.stdout + mk.stderr).lower():
-        print(f"::warning::could not create folder '{FOLDER}': {mk.stdout.strip()} {mk.stderr.strip()}")
-    for item in (f"{NB_NAME}.Notebook", f"{PL_NAME}.DataPipeline",
-                 f"{SM_NAME}.SemanticModel", f"{VL_NAME}.VariableLibrary",
-                 f"{WH_NAME}.Warehouse"):
-        mv = subprocess.run(["fab", "mv", f"{ws}.Workspace/{item}", folder_path, "-f"],
-                            capture_output=True, text=True, cwd=str(root))
-        if mv.returncode != 0:
-            print(f"::warning::could not move {item} into '{FOLDER}': {mv.stdout.strip()} {mv.stderr.strip()}")
 
 
 print("=== Deploy complete ===")

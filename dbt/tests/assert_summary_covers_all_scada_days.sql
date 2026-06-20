@@ -1,9 +1,4 @@
-{{ config(tags=['heavy']) }}
--- Summary should have at least as many distinct days as scada
--- Tagged heavy: with CI's small process_limit, some ingested daily files
--- may have all INTERVENTION=1 rows or unmapped DUIDs and produce zero
--- summary rows for that date. The assertion only makes sense at full data
--- volume.
+-- Summary should have at least as many distinct days as scada.
 SELECT
   scada_days,
   summary_days

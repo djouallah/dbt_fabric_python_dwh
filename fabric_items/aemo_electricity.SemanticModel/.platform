@@ -1,11 +1,11 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
-    "type": "Notebook",
-    "displayName": "run_dwh"
+    "type": "SemanticModel",
+    "displayName": "aemo_electricity"
   },
   "config": {
     "version": "2.0",
-    "logicalId": "eaad4e3c-0fad-4ff3-9c7a-a6a84b5ab037"
+    "logicalId": "30f73cc7-9d71-4044-881a-9d3c6a587927"
   }
 }

@@ -1,0 +1,13 @@
+__pycache__/
+target/
+logs/
+nul
+%SystemDrive%/
+_fab_deploy_pipeline.yml
+_fab_deploy_tmp.yml
+_remote_bim_cache.bim
+blog.md
+dbt/.user.yml
+dbt_packages/
+*.db
+.claude/

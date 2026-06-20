@@ -1,0 +1,36 @@
+defaults:
+  # Lakehouse: provisioned if missing, kept if it already exists. It holds the raw CSVs
+  # (Files/csv/**) and the archive log (Files/csv_archive_log.parquet) that the dbt-fabric
+  # models read via OPENROWSET. The file-landing pipeline is unchanged and not part of this
+  # project — it lands files here exactly as before.
+  lakehouse_name:    "data"
+  # Fabric Warehouse: provisioned if missing, kept if it exists. dbt models materialize
+  # here (schemas: landing, mart). Distinct name so it never clashes with the duckdb solution.
+  warehouse_name:    "aemo_wh"
+  # Workspace folder the new items are moved into (best-effort) so they sit apart from the
+  # duckdb solution when sharing a workspace. The notebook/pipeline/semantic-model/variable-
+  # library items themselves are already suffixed `_dwh` to avoid name clashes.
+  folder_name:       "aemo_dwh"
+  download_limit:    "2"
+  schedule_interval: "30"
+  schedule_start:    "2025-01-01T00:00:00"
+  schedule_end:      "2030-12-31T23:59:59"
+  ci_download_limit: "6"
+  ci_process_limit:  "2"
+
+local:
+  ws:            "91588e42-0f1c-4e56-bcaa-cbf015b8f312"
+  lakehouse:     "bf9ad9cb-295f-4df1-8cf0-519a8b2cfbda"
+  process_limit: "1000"
+  dbt_path:      "/lakehouse/default/Files/dbt_fabric_python_notebook_dwh/dbt"
+
+main:
+  ws:                "91588e42-0f1c-4e56-bcaa-cbf015b8f312"
+  schedule_interval: "720"
+  download_limit:    "5"
+  process_limit:     "100"
+
+production:
+  ws:             "be079b0f-3416-4de2-9184-9c546bad223c"
+  download_limit: "60"
+  process_limit:  "600"

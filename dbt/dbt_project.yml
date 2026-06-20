@@ -1,0 +1,37 @@
+name: 'aemo_electricity'
+version: '1.0.0'
+
+profile: 'aemo_electricity'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Fabric Warehouse has no implicit schemas — create the ones the models target before
+# any model runs. (There is no DuckDB azure_transport SET here anymore; reads go through
+# OPENROWSET with the warehouse identity.)
+on-run-start:
+  - "{{ create_schemas_if_not_exists(['landing', 'mart']) }}"
+
+vars:
+  # Env vars used:
+  # - DBT_SCHEMA: default schema (default: mart)
+  # - FILES_PATH: abfss OneLake Files root where the downloader lands CSVs (built by the runner)
+  # - process_limit: max files an incremental fact model ingests per run (default: 1000)
+
+models:
+  aemo_electricity:
+    staging:
+      +materialized: view
+      +schema: landing
+    dimensions:
+      +materialized: table
+    marts:
+      +materialized: incremental
+      +schema: landing

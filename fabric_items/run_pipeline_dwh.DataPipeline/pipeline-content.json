@@ -1,0 +1,58 @@
+{
+  "properties": {
+    "concurrency": 1,
+    "activities": [
+      {
+        "name": "Run Notebook",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "eaad4e3c-0fad-4ff3-9c7a-a6a84b5ab037",
+          "workspaceId": "e446a5e7-6666-42ad-a331-0bfef3187fbf",
+          "parameters": {
+            "pipelinecore": {
+              "value": 2,
+              "type": "int"
+            }
+          }
+        }
+      },
+      {
+        "name": "Run Notebook High",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          {
+            "activity": "Run Notebook",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "eaad4e3c-0fad-4ff3-9c7a-a6a84b5ab037",
+          "workspaceId": "e446a5e7-6666-42ad-a331-0bfef3187fbf",
+          "parameters": {
+            "pipelinecore": {
+              "value": 8,
+              "type": "int"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

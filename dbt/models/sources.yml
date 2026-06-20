@@ -1,0 +1,6 @@
+version: 2
+
+# No dbt sources. The archive log lives as Files/csv_archive_log.parquet in the existing
+# lakehouse (written by the unchanged file-landing pipeline) and is exposed through the
+# stg_csv_archive_log view via OPENROWSET. The raw AEMO CSVs under Files/csv/** are read
+# directly by the fact models via OPENROWSET (no source definitions needed).

@@ -1,0 +1,40 @@
+{{ config(
+    materialized='incremental',
+    incremental_strategy='append',
+    schema='landing'
+) }}
+
+{#-- Reads the same raw AEMO daily files (Files/csv/daily/*), filtering to the DUNIT SCADA
+     records. append + file-level NOT IN filter = idempotent at file grain (see fct_price for
+     the full rationale on why this replaces duckrun's safeappend). No partition_by in Fabric;
+     month_key kept as a plain column. --#}
+
+{%- set read_cols = [
+  'I','UNIT','XX','VERSION','SETTLEMENTDATE','RUNNO','DUID','INTERVENTION','DISPATCHMODE','AGCSTATUS',
+  'INITIALMW','TOTALCLEARED','RAMPDOWNRATE','RAMPUPRATE','LOWER5MIN','LOWER60SEC','LOWER6SEC','RAISE5MIN',
+  'RAISE60SEC','RAISE6SEC','MARGINAL5MINVALUE','MARGINAL60SECVALUE','MARGINAL6SECVALUE','MARGINALVALUE',
+  'VIOLATION5MINDEGREE','VIOLATION60SECDEGREE','VIOLATION6SECDEGREE','VIOLATIONDEGREE','LOWERREG','RAISEREG',
+  'AVAILABILITY','RAISE6SECFLAGS','RAISE60SECFLAGS','RAISE5MINFLAGS','RAISEREGFLAGS','LOWER6SECFLAGS',
+  'LOWER60SECFLAGS','LOWER5MINFLAGS','LOWERREGFLAGS','RAISEREGAVAILABILITY','RAISEREGENABLEMENTMAX',
+  'RAISEREGENABLEMENTMIN','LOWERREGAVAILABILITY','LOWERREGENABLEMENTMAX','LOWERREGENABLEMENTMIN',
+  'RAISE6SECACTUALAVAILABILITY','RAISE60SECACTUALAVAILABILITY','RAISE5MINACTUALAVAILABILITY',
+  'RAISEREGACTUALAVAILABILITY','LOWER6SECACTUALAVAILABILITY','LOWER60SECACTUALAVAILABILITY',
+  'LOWER5MINACTUALAVAILABILITY','LOWERREGACTUALAVAILABILITY'
+] -%}
+{%- set num_cols = read_cols | reject('in', ['I','UNIT','XX','DUID','SETTLEMENTDATE']) | list -%}
+
+SELECT
+  [UNIT],
+  [DUID],
+  {{ cast_floats(num_cols) }}
+  {{ parse_filename('src.filepath(1)') }} AS [file],
+  TRY_CAST([SETTLEMENTDATE] AS DATETIME2(6)) AS [SETTLEMENTDATE],
+  TRY_CAST([SETTLEMENTDATE] AS DATE) AS [DATE],
+  YEAR(TRY_CAST([SETTLEMENTDATE] AS DATETIME2(6))) AS [YEAR],
+  YEAR(TRY_CAST([SETTLEMENTDATE] AS DATETIME2(6))) * 100
+    + MONTH(TRY_CAST([SETTLEMENTDATE] AS DATETIME2(6))) AS [month_key]
+FROM {{ openrowset_csv(get_csv_archive_path() ~ '/daily/*', read_cols) }} AS src
+WHERE [I] = 'D' AND [UNIT] = 'DUNIT' AND [VERSION] = '3'
+{%- if is_incremental() %}
+  AND {{ parse_filename('src.filepath(1)') }} NOT IN (SELECT DISTINCT [file] FROM {{ this }})
+{%- endif %}

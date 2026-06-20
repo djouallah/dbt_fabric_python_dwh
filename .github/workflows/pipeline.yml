@@ -1,0 +1,189 @@
+name: 🚀 Deploy to Fabric (Warehouse)
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "dbt/**"
+      - "fabric_items/**"
+      - "deploy.py"
+      - "deploy_config.yml"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+  pages: write
+
+jobs:
+  pipeline:
+    name: 🎯 Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 🧩 Install Microsoft ODBC Driver 18
+        run: |
+          sudo curl -sSL https://packages.microsoft.com/keys/microsoft.asc -o /etc/apt/trusted.gpg.d/microsoft.asc
+          curl -sSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+
+      - name: 📦 Install dependencies
+        run: pip install dbt-fabric pyyaml ms-fabric-cli duckdb
+
+      - name: 🔐 Azure federated login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: 🎟️  Fabric CLI login
+        run: |
+          fab config set encryption_fallback_enabled true
+          FED_TOKEN=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r '.value')
+          fab auth login -t ${{ secrets.AZURE_TENANT_ID }} -u ${{ secrets.AZURE_CLIENT_ID }} --federated-token "$FED_TOKEN"
+
+      - name: 🏗️  Phase 1 — Provision Lakehouse + Warehouse
+        run: |
+          T0=$(date +%s)
+          WS_ID=$(python -c "import yaml; c=yaml.safe_load(open('deploy_config.yml')); print({**c.get('defaults',{}),**c['main']}['ws'])")
+          LH_NAME=$(python -c "import yaml; c=yaml.safe_load(open('deploy_config.yml')); print({**c.get('defaults',{}),**c['main']}['lakehouse_name'])")
+          WH_NAME=$(python -c "import yaml; c=yaml.safe_load(open('deploy_config.yml')); print({**c.get('defaults',{}),**c['main']}['warehouse_name'])")
+          WS_NAME=$(fab api -X get "workspaces/$WS_ID" | jq -r '.text.displayName' | tr -d '\r')
+          LAKEHOUSE="$WS_NAME.Workspace/$LH_NAME.Lakehouse"
+          WAREHOUSE="$WS_NAME.Workspace/$WH_NAME.Warehouse"
+
+          # Lakehouse — provision if missing, keep if present (holds the raw CSVs + log).
+          if fab exists "$LAKEHOUSE" | grep -qi true; then echo "✅ Lakehouse exists";
+          else echo "🛠️  Creating lakehouse..."; fab create "$LAKEHOUSE" -P enableSchemas=true; sleep 60; fi
+          LH_ID=$(fab get "$LAKEHOUSE" -q id | tr -d '\r')
+
+          # Warehouse — provision if missing, keep if present (dbt materializes here).
+          if fab exists "$WAREHOUSE" | grep -qi true; then echo "✅ Warehouse exists";
+          else echo "🛠️  Creating warehouse..."; fab create "$WAREHOUSE"; sleep 60; fi
+          DWH_SERVER=$(fab api -X get "workspaces/$WS_ID/warehouses" \
+            | jq -r --arg n "$WH_NAME" '.text.value[] | select(.displayName==$n) | .properties.connectionString' | tr -d '\r')
+
+          python - <<EOF >> "$GITHUB_ENV"
+          import yaml
+          cfg = yaml.safe_load(open('deploy_config.yml'))
+          e = {**cfg.get('defaults', {}), **cfg['main']}
+          print(f"download_limit={e.get('ci_download_limit', e.get('download_limit', '5'))}")
+          print(f"process_limit={e.get('ci_process_limit', e.get('process_limit', '100'))}")
+          EOF
+          {
+            echo "FILES_PATH=abfss://$WS_ID@onelake.dfs.fabric.microsoft.com/$LH_ID/Files"
+            echo "FABRIC_DWH_SERVER=$DWH_SERVER"
+            echo "FABRIC_DWH_NAME=$WH_NAME"
+            echo "FABRIC_AUTH=CLI"
+            echo "WS_ID=$WS_ID"
+            echo "WS_NAME=$WS_NAME"
+            echo "LH_ID=$LH_ID"
+            echo "LH_NAME=$LH_NAME"
+            echo "WH_NAME=$WH_NAME"
+            echo "T_LAKEHOUSE=$(($(date +%s) - T0))"
+          } >> "$GITHUB_ENV"
+
+      - name: ⬇️  Phase 1.5 — Download / land AEMO files
+        run: |
+          T0=$(date +%s)
+          # dbt-fabric can't run Python models, so the kept duckrun downloader
+          # (dbt/landing/stg_csv_archive_log.py) runs here as a standalone DuckDB step:
+          # it lands the gzip CSVs + csv_archive_log.parquet that the T-SQL models read.
+          STORAGE_TOKEN=$(az account get-access-token --resource https://storage.azure.com --query accessToken -o tsv)
+          STORAGE_TOKEN="$STORAGE_TOKEN" python - <<'EOF'
+          import os, importlib.util, duckdb
+          con = duckdb.connect()
+          con.sql("INSTALL azure; LOAD azure;")
+          # 'curl' transport avoids the Azure SDK's SSL CA cert error against OneLake.
+          con.sql("SET GLOBAL azure_transport_option_type='curl';")
+          con.sql(
+              "CREATE OR REPLACE SECRET onelake "
+              "(TYPE azure, PROVIDER access_token, ACCESS_TOKEN '" + os.environ["STORAGE_TOKEN"] + "')"
+          )
+          spec = importlib.util.spec_from_file_location("aemo_downloader", "dbt/landing/stg_csv_archive_log.py")
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          class _DbtStub:
+              def config(self, **kwargs):
+                  pass
+          mod.model(_DbtStub(), con)
+          con.close()
+          EOF
+          echo "T_DOWNLOAD=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
+
+      - name: 🔨 Phase 2 — dbt run
+        run: |
+          T0=$(date +%s)
+          DBT="--target dev --project-dir dbt --profiles-dir dbt"
+          # Same flow as the Fabric notebook; files were landed by Phase 1.5 above.
+          # 1. New daily pending? check_new_daily exits non-zero (raises) when yes.
+          if dbt run-operation check_new_daily $DBT; then NEW_DAILY=0; else NEW_DAILY=1; fi
+          echo "new_daily=$NEW_DAILY"
+          # 2. Build everything except the summary (retry once on failure).
+          DAILY_EX=""; [ "$NEW_DAILY" = "0" ] && DAILY_EX="--exclude fct_price --exclude fct_scada"
+          dbt run --exclude fct_summary $DAILY_EX $DBT \
+            || { echo "::warning::dbt run failed — retrying once..."; sleep 30; dbt retry $DBT; }
+          # 3. Summary: overwrite when a new daily landed, else append intraday.
+          FR=""; [ "$NEW_DAILY" = "1" ] && FR="--full-refresh"
+          dbt run --select fct_summary $FR $DBT
+          cp dbt/target/run_results.json /tmp/rr_0.json 2>/dev/null || true
+          echo "T_DBT_RUN=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
+
+      - name: ✅ Phase 3 — dbt test
+        run: |
+          T0=$(date +%s)
+          dbt test --target dev --project-dir dbt --profiles-dir dbt --exclude tag:heavy
+          cp dbt/target/run_results.json /tmp/test_results.json
+          echo "T_DBT_TEST=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
+
+      - name: 📚 Phase 4 — dbt docs generate
+        run: |
+          T0=$(date +%s)
+          dbt docs generate --target dev --project-dir dbt --profiles-dir dbt
+          echo "T_DBT_DOCS=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
+
+      - name: 🚀 Phase 5 — Deploy Fabric items
+        run: |
+          T0=$(date +%s)
+          if grep -q "^${{ github.ref_name }}:" deploy_config.yml; then
+            python deploy.py --env ${{ github.ref_name }}
+            echo "DEPLOY_SKIPPED=false" >> "$GITHUB_ENV"
+          else
+            echo "::notice::No '${{ github.ref_name }}' section in deploy_config.yml — skipping deploy."
+            echo "DEPLOY_SKIPPED=true" >> "$GITHUB_ENV"
+          fi
+          echo "T_DEPLOY=$(($(date +%s) - T0))" >> "$GITHUB_ENV"
+
+      - name: 📤 Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dbt/target
+
+  publish:
+    name: 🌐 Publish docs to Pages
+    needs: pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.page_url }}
+    steps:
+      - name: 🌐 Deploy to GitHub Pages
+        id: publish
+        uses: actions/deploy-pages@v4

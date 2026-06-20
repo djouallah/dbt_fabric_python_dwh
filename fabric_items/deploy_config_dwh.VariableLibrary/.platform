@@ -1,0 +1,11 @@
+{
+    "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+    "metadata": {
+        "type": "VariableLibrary",
+        "displayName": "deploy_config_dwh"
+    },
+    "config": {
+        "version": "2.0",
+        "logicalId": "1c9935c9-1a96-4ab5-a506-2280a3a80628"
+    }
+}

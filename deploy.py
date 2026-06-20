@@ -197,33 +197,60 @@ unchanged = (
 )
 cache_path.unlink(missing_ok=True)
 
+# Signature of the one error we recover from by deleting: a Direct-Lake-on-OneLake model is
+# bound to the warehouse ITEM ID, which changes whenever the warehouse is dropped/recreated. The
+# existing model then points at a now-deleted artifact and fab deploy's in-place UPDATE fails
+# server-side. Power BI cannot update a Direct Lake model whose source artifact is gone, so the
+# only remedy is to recreate it. We match this EXACT error so unrelated/transient failures never
+# trigger a destructive delete.
+STALE_BINDING_SIGNS = ("FailedToImportDataset", "is not found, or you do not have permission")
+
+
 def deploy_semantic_model():
+    """Deploy the SemanticModel, retrying transient failures. Returns (returncode, output)."""
+    content = (
+        'core:\n'
+        f'  workspace: "{ws}"\n'
+        '  repository_directory: "./fabric_items"\n'
+        '  item_types_in_scope:\n'
+        '    - SemanticModel\n'
+    )
+    tmp = root / "_fab_deploy_tmp.yml"
+    rc, out = 1, ""
     for attempt in range(1, 4):
+        tmp.write_text(content)
         try:
-            fab_deploy(["SemanticModel"])
-            return
-        except subprocess.CalledProcessError:
-            if attempt == 3:
-                raise
-            print(f"SemanticModel deploy attempt {attempt} failed (likely mid-refresh); waiting 45s and retrying...")
+            r = subprocess.run(["fab", "deploy", "--config", tmp.name, "-f"],
+                               capture_output=True, text=True, cwd=str(root))
+        finally:
+            tmp.unlink(missing_ok=True)
+        rc, out = r.returncode, (r.stdout or "") + (r.stderr or "")
+        print(out, end="")
+        if rc == 0:
+            return rc, out
+        if attempt < 3:
+            print(f"SemanticModel deploy attempt {attempt} failed; waiting 45s and retrying...")
             time.sleep(45)
+    return rc, out
+
 
 try:
     if unchanged:
         print("SemanticModel definition matches cached deploy, skipping fab_deploy.")
     else:
-        try:
-            deploy_semantic_model()
-        except subprocess.CalledProcessError:
-            # A Direct-Lake-on-OneLake model is bound to the warehouse ITEM ID, which changes
-            # whenever the warehouse is dropped/recreated. The existing model then points at a
-            # now-deleted artifact, and fab deploy's in-place UPDATE fails server-side with
-            # "The Fabric artifact '<old-wh-id>' is not found...". Delete the stale model and
-            # recreate it fresh against the current warehouse id.
-            print("SemanticModel publish failed (stale Direct Lake binding?); deleting and recreating fresh...")
+        rc, out = deploy_semantic_model()
+        if rc != 0:
+            if not all(s in out for s in STALE_BINDING_SIGNS):
+                raise SystemExit("SemanticModel deploy failed (not a stale-binding error) — see output above.")
+            # Warehouse was recreated -> the old Direct Lake source artifact is gone. Delete the
+            # orphaned model and recreate it against the current warehouse id. (Only reached after
+            # a warehouse recreate; normal runs keep the warehouse and update the model in place.)
+            print("Stale Direct Lake binding (warehouse recreated); deleting orphaned model and recreating...")
             subprocess.run(["fab", "rm", SEMANTIC_MODEL, "-f"], cwd=str(root))
             time.sleep(10)
-            deploy_semantic_model()
+            rc, out = deploy_semantic_model()
+            if rc != 0:
+                raise SystemExit("SemanticModel recreate failed — see output above.")
         subprocess.run(["fab", "mkdir", f"{LAKEHOUSE}/Files/semanticmodel"], cwd=str(root))
         fab(["cp", str(bim_path), remote_bim_path, "-f"])
 finally:
